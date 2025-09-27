@@ -16,9 +16,7 @@ const crearAlumno = async (req, res) => {
         const { nombre, apellido, email, numeroEstudiantil, telefono, fechaNacimiento, direccion } = req.body;
 
         // Verificar si el email o número estudiantil ya existen
-        const alumnoExistente = await Alumno.findOne({
-            $or: [{ email }, { numeroEstudiantil }]
-        });
+        const alumnoExistente = await Alumno.existsByEmailOrNumber(email, numeroEstudiantil);
 
         if (alumnoExistente) {
             return res.status(400).json({
@@ -26,7 +24,7 @@ const crearAlumno = async (req, res) => {
             });
         }
 
-        const nuevoAlumno = new Alumno({
+        const nuevoAlumno = await Alumno.create({
             nombre,
             apellido,
             email,
@@ -35,8 +33,6 @@ const crearAlumno = async (req, res) => {
             fechaNacimiento,
             direccion
         });
-
-        await nuevoAlumno.save();
 
         res.status(201).json({
             message: 'Alumno creado exitosamente',

@@ -17,7 +17,7 @@ const crearCurso = async (req, res) => {
         const { nombre, codigo, descripcion, creditos, profesor, capacidadMaxima, fechaInicio, fechaFin } = req.body;
 
         // Verificar si el código ya existe
-        const cursoExistente = await Curso.findOne({ codigo });
+        const cursoExistente = await Curso.findByCode(codigo);
         if (cursoExistente) {
             return res.status(400).json({
                 message: 'Ya existe un curso con este código'
@@ -32,7 +32,7 @@ const crearCurso = async (req, res) => {
             });
         }
 
-        const nuevoCurso = new Curso({
+        const nuevoCurso = await Curso.create({
             nombre,
             codigo,
             descripcion,
@@ -42,11 +42,6 @@ const crearCurso = async (req, res) => {
             fechaInicio,
             fechaFin
         });
-
-        await nuevoCurso.save();
-
-        // Poblar información del profesor
-        await nuevoCurso.populate('profesor', 'username email');
 
         res.status(201).json({
             message: 'Curso creado exitosamente',

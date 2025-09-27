@@ -43,13 +43,13 @@ const registrar = async (req, res) => {
         });
 
         // Generar token
-        const token = generarToken(nuevoUsuario._id);
+        const token = generarToken(nuevoUsuario.id);
 
         res.status(201).json({
             message: 'Usuario registrado exitosamente',
             token,
             usuario: {
-                id: nuevoUsuario._id,
+                id: nuevoUsuario.id,
                 username: nuevoUsuario.username,
                 email: nuevoUsuario.email,
                 role: nuevoUsuario.role

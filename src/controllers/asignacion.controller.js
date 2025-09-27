@@ -25,7 +25,7 @@ const asignarEstudianteACurso = async (req, res) => {
         }
 
         // Verificar que el curso existe y está activo
-        const cursoExiste = await Curso.findById(curso).populate('profesor', 'username email');
+        const cursoExiste = await Curso.findById(curso);
         if (!cursoExiste || !cursoExiste.activo) {
             return res.status(404).json({
                 message: 'Curso no encontrado o inactivo'
@@ -40,13 +40,9 @@ const asignarEstudianteACurso = async (req, res) => {
         }
 
         // Verificar si ya existe una asignación activa
-        const asignacionExistente = await Asignacion.findOne({
-            alumno,
-            curso,
-            activo: true
-        });
+        const asignacionExistente = await Asignacion.findByAlumnoAndCurso(alumno, curso);
 
-        if (asignacionExistente) {
+        if (asignacionExistente && asignacionExistente.activo) {
             return res.status(400).json({
                 message: 'El estudiante ya está inscrito en este curso'
             });
@@ -66,19 +62,11 @@ const asignarEstudianteACurso = async (req, res) => {
         }
 
         // Crear nueva asignación
-        const nuevaAsignacion = new Asignacion({
+        const nuevaAsignacion = await Asignacion.create({
             alumno,
             curso,
-            estado: new Date() >= cursoExiste.fechaInicio ? 'en_curso' : 'inscrito'
+            estado: new Date() >= new Date(cursoExiste.fechaInicio) ? 'en_curso' : 'inscrito'
         });
-
-        await nuevaAsignacion.save();
-
-        // Poblar datos para la respuesta
-        await nuevaAsignacion.populate([
-            { path: 'alumno', select: 'nombre apellido email numeroEstudiantil' },
-            { path: 'curso', select: 'nombre codigo profesor fechaInicio fechaFin' }
-        ]);
 
         res.status(201).json({
             message: 'Estudiante asignado al curso exitosamente',
@@ -110,13 +98,14 @@ const desasignarEstudianteDeCurso = async (req, res) => {
         }
 
         // Cambiar estado a retirado en lugar de eliminar
-        asignacion.estado = 'retirado';
-        asignacion.activo = false;
-        await asignacion.save();
+        const asignacionActualizada = await Asignacion.updateById(asignacion.id, {
+            estado: 'retirado',
+            activo: false
+        });
 
         res.json({
             message: 'Estudiante desasignado del curso exitosamente',
-            asignacion
+            asignacion: asignacionActualizada
         });
 
     } catch (error) {
@@ -290,19 +279,19 @@ const calificarEstudiante = async (req, res) => {
         const nuevoEstado = calificacionFinal >= 60 ? 'completado' : 'reprobado';
         const fechaCompletado = nuevoEstado === 'completado' ? new Date() : null;
 
-        asignacion.calificacionFinal = calificacionFinal;
-        asignacion.estado = nuevoEstado;
-        asignacion.fechaCompletado = fechaCompletado;
-        if (comentarios) asignacion.comentarios = comentarios;
+        const datosActualizacion = {
+            calificacionFinal,
+            estado: nuevoEstado,
+            fechaCompletado
+        };
+        
+        if (comentarios) datosActualizacion.comentarios = comentarios;
 
-        await asignacion.save();
+        const asignacionActualizada = await Asignacion.updateById(asignacion.id, datosActualizacion);
 
         res.json({
             message: `Estudiante ${nuevoEstado === 'completado' ? 'aprobado' : 'reprobado'} exitosamente`,
-            asignacion: {
-                ...asignacion.toObject(),
-                aprobo: asignacion.aprobo
-            }
+            asignacion: asignacionActualizada
         });
 
     } catch (error) {
