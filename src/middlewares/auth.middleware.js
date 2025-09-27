@@ -27,14 +27,24 @@ const verificarToken = async (req, res, next) => {
         // Verificar y decodificar token
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         
-        // Buscar usuario en la base de datos
-        const usuario = await Usuario.findById(decoded.id).select('-password');
+        // Verificar que el decoded contiene el ID
+        if (!decoded.id) {
+            return res.status(401).json({ 
+                message: 'Token inválido. ID de usuario no encontrado.' 
+            });
+        }
         
-        if (!usuario || !usuario.activo) {
+        // Buscar usuario en la base de datos
+        const usuario = await Usuario.findById(decoded.id);
+        
+        if (!usuario) {
             return res.status(401).json({ 
                 message: 'Token inválido. Usuario no encontrado o inactivo.' 
             });
         }
+        
+        // Remover password del objeto usuario antes de agregarlo al request
+        delete usuario.password;
 
         // Agregar usuario a la request
         req.usuario = usuario;

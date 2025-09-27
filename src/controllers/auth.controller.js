@@ -97,13 +97,13 @@ const login = async (req, res) => {
         }
 
         // Generar token
-        const token = generarToken(usuario._id);
+        const token = generarToken(usuario.id);
 
         res.json({
             message: 'Inicio de sesión exitoso',
             token,
             usuario: {
-                id: usuario._id,
+                id: usuario.id,
                 username: usuario.username,
                 email: usuario.email,
                 role: usuario.role
