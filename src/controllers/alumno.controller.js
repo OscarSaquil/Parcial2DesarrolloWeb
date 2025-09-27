@@ -51,39 +51,15 @@ const crearAlumno = async (req, res) => {
 // Obtener todos los alumnos
 const obtenerAlumnos = async (req, res) => {
     try {
-        const { page = 1, limit = 10, activo, search } = req.query;
+        // Consulta SQL simple sin filtros complicados
+        const sql = 'SELECT * FROM alumnos ORDER BY created_at DESC LIMIT 50';
         
-        // Construir filtros
-        const filtros = {};
-        if (activo !== undefined) filtros.activo = activo === 'true';
-        if (search) {
-            filtros.$or = [
-                { nombre: { $regex: search, $options: 'i' } },
-                { apellido: { $regex: search, $options: 'i' } },
-                { email: { $regex: search, $options: 'i' } },
-                { numeroEstudiantil: { $regex: search, $options: 'i' } }
-            ];
-        }
-
-        // Paginación
-        const skip = (page - 1) * limit;
-
-        const alumnos = await Alumno.find(filtros)
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(parseInt(limit));
-
-        const total = await Alumno.countDocuments(filtros);
+        const { executeQuery } = require('../config/database');
+        const alumnos = await executeQuery(sql, []);
 
         res.json({
             message: 'Alumnos obtenidos exitosamente',
-            alumnos,
-            pagination: {
-                currentPage: parseInt(page),
-                totalPages: Math.ceil(total / limit),
-                totalItems: total,
-                itemsPerPage: parseInt(limit)
-            }
+            alumnos
         });
 
     } catch (error) {
@@ -226,23 +202,11 @@ const obtenerCursosAlumno = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const asignaciones = await Asignacion.find({ alumno: id, activo: true })
-            .populate('curso')
-            .sort({ fechaAsignacion: -1 });
+        const asignaciones = await Asignacion.findByAlumno(id);
 
         res.json({
             message: 'Cursos del alumno obtenidos exitosamente',
-            cursos: asignaciones.map(asignacion => ({
-                ...asignacion.curso.toObject(),
-                asignacion: {
-                    id: asignacion._id,
-                    fechaAsignacion: asignacion.fechaAsignacion,
-                    estado: asignacion.estado,
-                    calificacionFinal: asignacion.calificacionFinal,
-                    fechaCompletado: asignacion.fechaCompletado,
-                    aprobo: asignacion.aprobo
-                }
-            }))
+            asignaciones
         });
 
     } catch (error) {
@@ -266,9 +230,7 @@ const obtenerHistorialAcademico = async (req, res) => {
             });
         }
 
-        const asignaciones = await Asignacion.find({ alumno: id })
-            .populate('curso', 'nombre codigo creditos')
-            .sort({ fechaAsignacion: -1 });
+        const asignaciones = await Asignacion.findByAlumno(id);
 
         // Calcular estadísticas
         const estadisticas = {

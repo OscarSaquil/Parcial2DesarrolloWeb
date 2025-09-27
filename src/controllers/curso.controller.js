@@ -62,28 +62,61 @@ const obtenerCursos = async (req, res) => {
     try {
         const { page = 1, limit = 10, activo, profesor, search } = req.query;
         
-        // Construir filtros
-        const filtros = {};
-        if (activo !== undefined) filtros.activo = activo === 'true';
-        if (profesor) filtros.profesor = profesor;
-        if (search) {
-            filtros.$or = [
-                { nombre: { $regex: search, $options: 'i' } },
-                { codigo: { $regex: search, $options: 'i' } },
-                { descripcion: { $regex: search, $options: 'i' } }
-            ];
+        // Query SQL básica con JOIN para obtener datos del profesor
+        let sql = `
+            SELECT c.*, u.username as profesor_username, u.email as profesor_email
+            FROM cursos c
+            LEFT JOIN usuarios u ON c.profesor_id = u.id
+            WHERE 1=1
+        `;
+        const params = [];
+        
+        if (activo !== undefined) {
+            sql += ' AND c.activo = ?';
+            params.push(activo === 'true');
         }
+        
+        if (profesor) {
+            sql += ' AND c.profesor_id = ?';
+            params.push(parseInt(profesor));
+        }
+        
+        if (search) {
+            sql += ' AND (c.nombre LIKE ? OR c.codigo LIKE ? OR c.descripcion LIKE ?)';
+            const searchTerm = `%${search}%`;
+            params.push(searchTerm, searchTerm, searchTerm);
+        }
+        
+        sql += ' ORDER BY c.created_at DESC LIMIT ? OFFSET ?';
+        const offset = (page - 1) * limit;
+        params.push(parseInt(limit), parseInt(offset));
 
-        // Paginación
-        const skip = (page - 1) * limit;
-
-        const cursos = await Curso.find(filtros)
-            .populate('profesor', 'username email')
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(parseInt(limit));
-
-        const total = await Curso.countDocuments(filtros);
+        // Ejecutar consulta
+        const { executeQuery } = require('../config/database');
+        const cursos = await executeQuery(sql, params);
+        
+        // Contar total
+        let countSql = 'SELECT COUNT(*) as total FROM cursos c WHERE 1=1';
+        const countParams = [];
+        
+        if (activo !== undefined) {
+            countSql += ' AND c.activo = ?';
+            countParams.push(activo === 'true');
+        }
+        
+        if (profesor) {
+            countSql += ' AND c.profesor_id = ?';
+            countParams.push(parseInt(profesor));
+        }
+        
+        if (search) {
+            countSql += ' AND (c.nombre LIKE ? OR c.codigo LIKE ? OR c.descripcion LIKE ?)';
+            const searchTerm = `%${search}%`;
+            countParams.push(searchTerm, searchTerm, searchTerm);
+        }
+        
+        const countResult = await executeQuery(countSql, countParams);
+        const total = countResult[0].total;
 
         res.json({
             message: 'Cursos obtenidos exitosamente',
@@ -110,15 +143,23 @@ const obtenerCursoPorId = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const curso = await Curso.findById(id)
-            .populate('profesor', 'username email')
-            .populate('estudiantesInscritos');
-
-        if (!curso) {
+        const sql = `
+            SELECT c.*, u.username as profesor_username, u.email as profesor_email
+            FROM cursos c
+            LEFT JOIN usuarios u ON c.profesor_id = u.id
+            WHERE c.id = ? AND c.activo = TRUE
+        `;
+        
+        const { executeQuery } = require('../config/database');
+        const result = await executeQuery(sql, [id]);
+        
+        if (result.length === 0) {
             return res.status(404).json({
                 message: 'Curso no encontrado'
             });
         }
+
+        const curso = result[0];
 
         res.json({
             message: 'Curso obtenido exitosamente',
@@ -150,11 +191,13 @@ const actualizarCurso = async (req, res) => {
 
         // Si se está actualizando el código, verificar que no exista
         if (actualizaciones.codigo) {
-            const cursoExistente = await Curso.findOne({ 
-                codigo: actualizaciones.codigo, 
-                _id: { $ne: id } 
-            });
-            if (cursoExistente) {
+            const { executeQuery } = require('../config/database');
+            const existeResult = await executeQuery(
+                'SELECT COUNT(*) as count FROM cursos WHERE codigo = ? AND id != ? AND activo = TRUE', 
+                [actualizaciones.codigo, id]
+            );
+            
+            if (existeResult[0].count > 0) {
                 return res.status(400).json({
                     message: 'Ya existe un curso con este código'
                 });
@@ -171,11 +214,7 @@ const actualizarCurso = async (req, res) => {
             }
         }
 
-        const cursoActualizado = await Curso.findByIdAndUpdate(
-            id,
-            actualizaciones,
-            { new: true, runValidators: true }
-        ).populate('profesor', 'username email');
+        const cursoActualizado = await Curso.updateById(id, actualizaciones);
 
         if (!cursoActualizado) {
             return res.status(404).json({
@@ -202,11 +241,7 @@ const eliminarCurso = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const curso = await Curso.findByIdAndUpdate(
-            id,
-            { activo: false },
-            { new: true }
-        );
+        const curso = await Curso.updateById(id, { activo: false });
 
         if (!curso) {
             return res.status(404).json({
@@ -215,10 +250,8 @@ const eliminarCurso = async (req, res) => {
         }
 
         // También marcar como inactivas las asignaciones del curso
-        await Asignacion.updateMany(
-            { curso: id },
-            { activo: false }
-        );
+        const { executeQuery } = require('../config/database');
+        await executeQuery('UPDATE asignaciones SET activo = FALSE WHERE curso_id = ?', [id]);
 
         res.json({
             message: 'Curso eliminado exitosamente',
@@ -239,21 +272,11 @@ const obtenerEstudiantesCurso = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const asignaciones = await Asignacion.find({ curso: id, activo: true })
-            .populate('alumno')
-            .sort({ fechaAsignacion: -1 });
+        const asignaciones = await Asignacion.findByCurso(id);
 
         res.json({
             message: 'Estudiantes del curso obtenidos exitosamente',
-            estudiantes: asignaciones.map(asignacion => ({
-                ...asignacion.alumno.toObject(),
-                asignacion: {
-                    id: asignacion._id,
-                    fechaAsignacion: asignacion.fechaAsignacion,
-                    estado: asignacion.estado,
-                    calificacionFinal: asignacion.calificacionFinal
-                }
-            }))
+            asignaciones
         });
 
     } catch (error) {

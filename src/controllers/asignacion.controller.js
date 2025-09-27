@@ -49,11 +49,7 @@ const asignarEstudianteACurso = async (req, res) => {
         }
 
         // Verificar capacidad del curso
-        const estudiantesInscritos = await Asignacion.countDocuments({
-            curso,
-            activo: true,
-            estado: { $in: ['inscrito', 'en_curso'] }
-        });
+        const estudiantesInscritos = await Asignacion.countStudentsInCourse(curso);
 
         if (estudiantesInscritos >= cursoExiste.capacidadMaxima) {
             return res.status(400).json({
@@ -122,7 +118,7 @@ const obtenerAsignaciones = async (req, res) => {
     try {
         const { page = 1, limit = 10, alumno, curso, estado, activo } = req.query;
         
-        // Construir filtros
+        // Construir filtros para MySQL
         const filtros = {};
         if (alumno) filtros.alumno = alumno;
         if (curso) filtros.curso = curso;
@@ -130,16 +126,12 @@ const obtenerAsignaciones = async (req, res) => {
         if (activo !== undefined) filtros.activo = activo === 'true';
 
         // Paginación
-        const skip = (page - 1) * limit;
+        const offset = (page - 1) * limit;
+        filtros.limit = parseInt(limit);
+        filtros.offset = offset;
 
-        const asignaciones = await Asignacion.find(filtros)
-            .populate('alumno', 'nombre apellido email numeroEstudiantil')
-            .populate('curso', 'nombre codigo profesor fechaInicio fechaFin')
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(parseInt(limit));
-
-        const total = await Asignacion.countDocuments(filtros);
+        const asignaciones = await Asignacion.findAll(filtros);
+        const total = await Asignacion.count(filtros);
 
         res.json({
             message: 'Asignaciones obtenidas exitosamente',
@@ -318,18 +310,15 @@ const obtenerReporteAsignaciones = async (req, res) => {
         if (curso) filtros.curso = curso;
         if (estado) filtros.estado = estado;
 
-        const asignaciones = await Asignacion.find(filtros)
-            .populate('alumno', 'nombre apellido email numeroEstudiantil')
-            .populate('curso', 'nombre codigo creditos profesor')
-            .sort({ fechaAsignacion: -1 });
+        const asignaciones = await Asignacion.findAll(filtros);
 
         // Calcular estadísticas
         const estadisticas = {
             totalAsignaciones: asignaciones.length,
             porEstado: {},
             promedioCalificaciones: 0,
-            estudiantesUnicos: new Set(asignaciones.map(a => a.alumno._id.toString())).size,
-            cursosUnicos: new Set(asignaciones.map(a => a.curso._id.toString())).size
+            estudiantesUnicos: new Set(asignaciones.map(a => a.alumno_id)).size,
+            cursosUnicos: new Set(asignaciones.map(a => a.curso_id)).size
         };
 
         // Contar por estado
